@@ -1,0 +1,71 @@
+# 容器平台底层采用 kubernetes（k8s） 作为编排引擎，支持原生 k8s yaml定义
+# 每一个 --- 分隔代表一个 k8s 资源定义
+# 常见资源有 Deployment、Statefulsets、Service、Route、Confimap、Secret、Persistentvolumeclaim 等，详细使用方式请查阅下文【k8s reference】
+# 以下 demo 展示一个典型的容器服务本身暴露8080端口，最终通过Route提供外部路由
+---
+kind: Deployment                     # Deployment 代表容器应用的一次部署，不建议直接使用rc、rs、pod等
+apiVersion: apps/v1
+metadata:
+  name: creditpc       # 所有资源都需要指定 metadata.name 字段，如无特殊需求，建议指定为有可读性的应用名称，同namespace 同类型资源下不可重名
+  labels:
+    app: creditpc        # 建议同一应用下所有资源均加上一个相同的label，以便进行管理，下文中的Service 与 Route 也是由 app: my-application-name 这一label控制
+  namespace: fa16-1230068-uat-credit    # 对应容器平台的 namespace 名称（前置条件中申请的命名空间）
+spec:
+  replicas: 1
+  selector:
+    matchLabels:
+      app: creditpc
+  template:
+    metadata:
+      labels:
+        app: creditpc
+    spec:
+      restartPolicy: Always
+      containers:
+        - name: creditpc
+          image: [image]             # 镜像名由流水线平台填充为本次构建的镜像，开发人员需用 [image] 进行占位，如果不需流水线指定，也可填写镜像全路径
+          imagePullPolicy: Always
+          env:
+            - name: TZ
+              value: Asia/Shanghai
+          ports:
+            - containerPort: 8080
+          resources:
+            requests:
+              cpu: '0.2'
+              memory: 2G
+            limits:
+              cpu: '2'
+              memory: 1G
+---
+kind: Service                        # Service 类型资源，指定一个内部路由，由 selector 字段定义服务对应的容器
+apiVersion: v1
+metadata:
+  name: creditpc
+  labels:
+    app: creditpc
+  namespace: fa16-1230068-uat-credit
+spec:
+  type: ClusterIP
+  ports:
+    - targetPort: 8080              # targetPort为容器的端口
+      protocol: TCP
+      name: 8080-8080
+      port: 8080
+  selector:
+    app: creditpc
+---
+kind: Route                         # Route 类型资源，指定一个外部路由
+apiVersion: route.openshift.io/v1
+metadata:
+  name: creditpc
+  labels:
+    app: creditpc
+  namespace: fa16-1230068-uat-credit
+spec:
+  to:
+    kind: Service
+    name: creditpc
+  host: cqaarn.bcsoa.cmbchina.cn   # 分行用户请使用 *.bcs.cmbchina.cn 作为外部路由
+  port:
+    targetPort: 8080-8080          # targetPort为 service 定义的端口，可以用端口也可以用名字
